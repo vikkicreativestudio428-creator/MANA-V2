@@ -1,0 +1,26 @@
+const API = (window.MANA_API_BASE || "").replace(/\/$/, "");
+
+async function loadApplications() {
+  const output = document.getElementById("applications");
+  if (!output) return;
+
+  output.textContent = "Loading applications...";
+
+  try {
+    const response = await fetch(`${API}/api/admin/applications`, {
+      credentials: "include"
+    });
+
+    if (!response.ok) {
+      output.textContent = "Please login or check backend connection.";
+      return;
+    }
+
+    const data = await response.json();
+    output.textContent = JSON.stringify(data, null, 2);
+  } catch (error) {
+    output.textContent = "Backend is not connected yet.";
+  }
+}
+
+document.addEventListener("DOMContentLoaded", loadApplications);
