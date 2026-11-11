@@ -1,0 +1,1 @@
+window.MANA_API_BASE = "https://YOUR-BACKEND-URL";
