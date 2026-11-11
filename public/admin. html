@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MANA Admin</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+  <script defer src="admin.js"></script>
+</head>
+<body>
+  <main class="wrap">
+    <h1>MANA Admin Dashboard</h1>
+    <p>Application management</p>
+    <pre id="applications">Loading...</pre>
+    <a href="/">Back to MANA website</a>
+  </main>
+</body>
+</html>
