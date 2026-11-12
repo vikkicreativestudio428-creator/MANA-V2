@@ -1,0 +1,176 @@
+
+require("dotenv").config();
+
+const express = require("express");
+const helmet = require("helmet");
+const cors = require("cors");
+const rateLimit = require("express-rate-limit");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+const cookieParser = require("cookie-parser");
+const { pool, initDB } = require("./db");
+
+const app = express();
+const PORT = process.env.PORT || 4000;
+
+app.use(helmet());
+app.use(express.json({ limit: "20kb" }));
+app.use(cookieParser());
+
+const allowedOrigins = (process.env.FRONTEND_ORIGINS || "")
+  .split(",")
+  .map(x => x.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    callback(new Error("Origin not allowed"));
+  },
+  credentials: true
+}));
+
+app.use("/api", rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 100
+}));
+
+function requireAdmin(req, res, next) {
+  try {
+    const token = req.cookies.mana_admin;
+    if (!token) {
+      return res.status(401).json({ error: "Login required" });
+    }
+
+    req.admin = jwt.verify(token, process.env.JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ error: "Invalid session" });
+  }
+}
+
+app.get("/", (req, res) => {
+  res.json({ app: "MANA Backend", status: "running" });
+});
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+app.post("/api/applications", async (req, res) => {
+  try {
+    const { type, name, email, phone, country, ...details } = req.body;
+
+    if (
+      !["host", "agency", "bd"].includes(type) ||
+      typeof name !== "string" ||
+      name.trim().length < 2 ||
+      typeof email !== "string" ||
+      !email.includes("@")
+    ) {
+      return res.status(400).json({
+        error: "Invalid application details"
+      });
+    }
+
+    await pool.query(
+      `INSERT INTO applications
+       (type, name, email, phone, country, details)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [
+        type,
+        name.trim(),
+        email.trim().toLowerCase(),
+        phone || null,
+        country || null,
+        details
+      ]
+    );
+
+    res.status(201).json({ message: "Application received" });
+  } catch (error) {
+    console.error("Application error:", error);
+    res.status(500).json({
+      error: "Could not save application"
+    });
+  }
+});
+
+app.post("/api/admin/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const result = await pool.query(
+      "SELECT * FROM admins WHERE email=$1",
+      [String(email || "").toLowerCase()]
+    );
+
+    const admin = result.rows[0];
+
+    if (
+      !admin ||
+      !await bcrypt.compare(password || "", admin.password_hash)
+    ) {
+      return res.status(401).json({ error: "Incorrect login" });
+    }
+
+    const token = jwt.sign(
+      { id: admin.id, email: admin.email },
+      process.env.JWT_SECRET,
+      { expiresIn: "2h" }
+    );
+
+    res.cookie("mana_admin", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "none",
+      maxAge: 2 * 60 * 60 * 1000
+    });
+
+    res.json({ message: "Login successful" });
+  } catch (error) {
+    console.error("Admin login error:", error);
+    res.status(500).json({ error: "Login failed" });
+  }
+});
+
+app.get("/api/admin/applications", requireAdmin, async (req, res) => {
+  const result = await pool.query(
+    "SELECT * FROM applications ORDER BY created_at DESC LIMIT 200"
+  );
+
+  res.json(result.rows);
+});
+
+app.patch("/api/admin/applications/:id", requireAdmin, async (req, res) => {
+  const { status } = req.body;
+
+  if (!["pending", "approved", "rejected"].includes(status)) {
+    return res.status(400).json({ error: "Invalid status" });
+  }
+
+  await pool.query(
+    "UPDATE applications SET status=$1 WHERE id=$2",
+    [status, req.params.id]
+  );
+
+  res.json({ message: "Status updated" });
+});
+
+app.post("/api/admin/logout", (req, res) => {
+  res.clearCookie("mana_admin");
+  res.json({ message: "Logged out" });
+});
+
+initDB()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`MANA server running on ${PORT}`);
+    });
+  })
+  .catch(error => {
+    console.error("Database startup failed:", error);
+    process.exit(1);
+  });
